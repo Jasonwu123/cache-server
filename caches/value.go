@@ -12,24 +12,24 @@ const (
 
 // value是一个包装了数据的结构体
 type value struct {
-	data  []byte // 存储真正的数据
-	ttl   int64  // 数据寿命，单位是秒
-	ctime int64  //  数据创建时间
+	Data  []byte // 存储真正的数据
+	Ttl   int64  // 数据寿命，单位是秒
+	Ctime int64  //  数据创建时间
 }
 
 // newValue返回一个包装后的数据
 func newValue(data []byte, ttl int64) *value {
 	return &value{
-		data:  helpers.Copy(data),
-		ttl:   ttl,
-		ctime: time.Now().Unix(),
+		Data:  helpers.Copy(data),
+		Ttl:   ttl,
+		Ctime: time.Now().Unix(),
 	}
 }
 
 // alive返回数据是否存活
 func (v *value) alive() bool {
 	// 首先判断是否有过期时间，然后判断当前时间是否超过了这个数据的死期
-	return v.ttl == NeverDie || time.Now().Unix()-v.ctime < v.ttl
+	return v.Ttl == NeverDie || time.Now().Unix()-v.Ctime < v.Ttl
 }
 
 // visit返回数据的实际存储数据
@@ -41,6 +41,6 @@ func (v *value) visit() []byte {
 	// 一般会使用锁来处理，但是这里牵扯到读取性能，如果使用锁，就会显得非常臃肿和拉跨
 	// 于是就使用了 atomic 包轻量化地去处理，这里直接使用了交换更新数据，而没有使用 CAS 的方式
 	// 后交换成功的会把先交换成功的时间改掉，所以这里不保证交换的时间一定是更加新的时间
-	atomic.SwapInt64(&v.ctime, time.Now().Unix())
-	return v.data
+	atomic.SwapInt64(&v.Ctime, time.Now().Unix())
+	return v.Data
 }

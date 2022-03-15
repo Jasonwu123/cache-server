@@ -21,12 +21,26 @@ func NewCache() *Cache {
 
 // NewCacheWith 返回一个指定配置的缓存对象
 func NewCacheWith(options Options) *Cache {
+	// 先从持久化文件进行恢复，如果恢复不成功，则返回一个空的缓存
+	if cache, ok := recoverFromDumpFile(options.DumpFile); ok {
+		return cache
+	}
+
 	return &Cache{
 		data:    make(map[string]*value, 256),
 		options: options,
 		status:  newStatus(),
 		lock:    &sync.RWMutex{},
 	}
+}
+
+// recoverFromDumpFile 从dumpFile中恢复缓存，如果恢复不成功则返回nil和false
+func recoverFromDumpFile(dumpFile string) (*Cache, bool) {
+	cache, err := newEmptyDump().from(dumpFile)
+	if err != nil {
+		return nil, false
+	}
+	return cache, true
 }
 
 // Get 返回指定key的value，找不到则返回false
@@ -70,14 +84,14 @@ func (c Cache) SetWithTTL(key string, value []byte, ttl int64) error {
 
 	if oldValue, ok := c.data[key]; ok {
 		// 如果是已经存在的key，就不属于新增，为方便管理，把原来的键值对信息去除
-		c.status.subEntry(key, oldValue.data)
+		c.status.subEntry(key, oldValue.Data)
 	}
 
 	// 判断缓存容量是否足够，如果不够，则返回写满保护的错误信息
 	if !c.checkEntrySize(key, value) {
 		// 注意刚刚把旧的键值对信息去除了，现在要加回去，因为并没有添加新的键值对
 		if oldValue, ok := c.data[key]; ok {
-			c.status.addEntry(key, oldValue.data)
+			c.status.addEntry(key, oldValue.Data)
 		}
 		return errors.New("the entry size will exceed if you set this entry.")
 	}
@@ -96,7 +110,7 @@ func (c *Cache) Delete(key string) {
 
 	if oldValue, ok := c.data[key]; ok {
 		// 如果存在key才会删除，并且需要先把缓存信息更新掉
-		c.status.subEntry(key, oldValue.data)
+		c.status.subEntry(key, oldValue.Data)
 		delete(c.data, key)
 	}
 }
@@ -124,7 +138,7 @@ func (c *Cache) gc() {
 	count := 0
 	for key, value := range c.data {
 		if !value.alive() {
-			c.status.subEntry(key, value.data)
+			c.status.subEntry(key, value.Data)
 			delete(c.data, key)
 			count++
 			if count >= c.options.MaxGcCount {
@@ -143,6 +157,28 @@ func (c *Cache) AutoGc() {
 			select {
 			case <-ticker.C:
 				c.gc()
+			}
+		}
+	}()
+}
+
+// dump 持久化缓存方法
+func (c *Cache) dump() error {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
+	// 创建出dump对象并持久化到文件
+	return newDump(c).to(c.options.DumpFile)
+}
+
+// AutoDump 开启定时任务去持久化缓存
+func (c *Cache) AutoDump() {
+	go func() {
+		ticker := time.NewTicker(time.Duration(c.options.DumpDuration) * time.Minute)
+		for {
+			select {
+			case <-ticker.C:
+				c.dump()
 			}
 		}
 	}()
